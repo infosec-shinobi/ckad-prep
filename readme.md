@@ -373,3 +373,183 @@ kubectl run test --image=busybox --restart=Never --port=80 -o yaml --dry-run=cli
 * metrics server is a cluster wid aggregator of resource usage data
 * get metrics for cluster nodes: ```kubectl top nodes```
 * get metrics for podss: ```kubectl top pod <pod name>```
+
+### Pod Design
+
+#### Label
+
+* key value pairs attached to objects that can be used in search queries
+* limited to max length of 63 chars
+* only allowed to use alphanumeric and separator chars
+* can apply 0:n labels to objects
+* can modify objects in use
+* Can apply labels with run command using ```--labels``` or ```-l``` option followed by ```=key=value,key2=value2```
+  * ```kubectl run pickles --impage=busybox --labels=env=prod,cucumber=false```
+* Can also apply lables via the metadata.labels section in yaml
+
+        apiVersion: v1
+        kind: Pod
+        metadata:
+        name: pickles
+        labels:
+            env: prod
+            cucumber: false
+        spec:
+        containers:
+        - image: busybox
+            name: busybox
+* view labels on objects using the ```describe``` or ```get``` kubectl command
+* adding ```--show-labels``` command line option allows you to quickly view all object type labels or a specific object type labels, this option adds a new column to the output called "Labels"
+* can use the label command to:
+  * add labels: ```kubectl label pod pickles spicy=yes```
+  * update labels:  ```kubectl label pod pickles spicy=no --overwrite```
+    * error if trying to update without the ```-overwrite``` option
+  * remove labels: ```kubectl label pod pickles spicy-```
+* Label selection
+  * command line: use the ```--selector``` or ```-l``` option
+    * equality-based: ```=```, ```==```, or ```!=```
+      * Can add multiple filters together with ```AND``` and ```OR```
+      * ```kubectl get pods -l env=prod --show-labels```
+      * ```kubectl get pods -l 'env=prod OR env=dev' --show-labels```
+    * set based : ```in```, ```notin```, ```exists```
+      * ```kubectl get pods -l 'env in (prod, dev)' --show-labels```
+  * combine both search types: ```kubectl get pods -l 'evn in (prod, dev)',spicy=true --show-labels```
+  * Some objects allow for filtering pods, but this is specific to each api on how it is done (examples include deployments and services)
+
+#### Annotation
+
+* key value pairs for providing metadata
+* can't be used for querying or selecting
+* helpful for storing data about itself
+* No options via ```kubectl run``` to add annotations via cli at start, must be done via yaml
+* Defined in metadata.annotations like:
+
+        apiVersion: v1
+        kind: Pod
+        metadata:
+        name: pickles
+        annotations:
+            field: 3
+            author: 'Dave Gardner'
+        spec:
+        containers:
+        - image: busybox
+            name: busybox
+* ```kubectl describe``` and ```kubectl get``` will display annotations for objects
+* Modify annotation for active things via ```kubectl annotate```
+  * add: ```kubectl annotate pod pickles spicy=yes```
+  * update:  ```kubectl annotate pod pickles spicy=no --overwrite```
+    * error if trying to update without the ```-overwrite``` option
+  * remove: ```kubectl annotate pod pickles spicy-```
+
+
+#### Deployment
+
+* gives ability to specify the number of pods to always run
+* Uses ReplicaSet under the hood
+* Create deployment via cli: ```kubectl create deployment deploy-the-things --image=busybox:1.31```
+* Create deployment via yaml
+
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: deploy-the-things
+          labels:
+            app: deploy-the-things
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: deploy-the-things
+          template:
+            metadata:
+              labels:
+                app: deploy-the-things
+            spec:
+              containers:
+              - name: busybox
+                image: busybox:1.31
+
+* list deployments: ```kubectl get deployments```
+* get info about deployment: ```kubectl describe deployment.apps/deploy-the-things```
+* see history of deployment: ```kubectl rollout history deployment deploy-the-things```
+  * by default, 10 revisions will be stored in history
+  * can change the default via spec.revisionHistoryLimit
+* view detailed info about a specific revision via: ```kubectl rollout history deployment deploy-the-things --revision=3```
+* rollback a deployment: ```kubectl rollout undo deployment deploy-the-things --to-revision=1```
+* scale a deployment manually: ```kubectl scale deployment deploy-the-things --replicas=10```
+  * record of this event can be viewed via describe on deployment
+* autoscaling a deployment
+  * horizontal pod autoscaler (HPA)
+    * scales the number of replicas based on cpu and memory of thresholds
+    * standard k8s feature
+    * CLI: ```kubectl autoscale deployment example --cpu-percent=80 --min=4 --max=6```
+    * Get status: ```kubectl get horizontalpodautoscalers``` or ```hpa``` for short
+      * if the status shows ```<unknown>```, usually means the metrics server isn't running, is misconfigured, of pod template doesn't define resource requirements
+        * check the events for the hpa: ```kubectl describe hpa example```
+  * vertical pod autoscaler (VPA)
+    * scales the cpu and memory allocation for existing pods based on historic metrics
+    * has to be supported by cloud provider as an add-on or installed manually
+  * use k8s metrics server
+
+#### Job
+
+* runs for a specific number of completions
+* not automatically cleaned up once complete
+* can use the spec.ttlSecondsAfterFinished attribute for auto-cleanup
+* create a job ```kubectl create job hello-world --image=busybox -- /bin/sh -c 'echo "Hello World"'```
+* you can use ```kubectl get``` and ```kubectl logs``` for getting info about jobs
+* deploy job via yaml
+
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: hello-world
+        spec:
+          template:
+            spec:
+              containers:
+              - name: hello-world
+                image: busybox
+                command:
+                - /bin/sh
+                - -c
+                - echo "hello world"
+            restartPolicy: Never
+
+* default behavior is to run workload in a single pod and expect one successful completion, which is called non-parallel job
+  * can tweak the spec if you want more completions via spec.template.spec.completions
+  * if you want multiple pods to be used, tweak the spec.template.spec.parallelism value
+* spec.backoffLimit determines the number of retries allowed (default is 6)
+* job template must declare the restart policy via spec.template.spec.restartPolicy
+  * Must be either "OnFailure" or "Never"
+
+#### CronJob
+
+* schedule jobs
+* can be scheduled via cron-expression
+* create a cronjob ```kubectl create cronjob hello-world --schedule="* * * * *"--image=busybox -- /bin/sh -c 'echo "Hello World"'```
+* you can use ```kubectl get``` and ```kubectl logs``` for getting info about cronjobs
+* deploy cronjob via yaml
+
+        apiVersion: batch/v1beta1
+        kind: CronJob
+        metadata:
+          name: hello-world
+        spec:
+          schedule: "* * * * *"
+          jobTemplate:
+            spec:
+              template:
+                spec:
+                  containers:
+                  - name: hello-world
+                    image: busybox
+                    command:
+                    - /bin/sh
+                    - -c
+                    - echo "hello world"
+                restartPolicy: Never
+
+* by default cronJob maintains history of last 3 successful pods and the last failed pod
+* use spec.successfulJobsHistoryLimit and spec.failedJobsHistoryLimit to check attributes for retention
