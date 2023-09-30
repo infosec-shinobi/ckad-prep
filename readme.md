@@ -553,3 +553,128 @@ kubectl run test --image=busybox --restart=Never --port=80 -o yaml --dry-run=cli
 
 * by default cronJob maintains history of last 3 successful pods and the last failed pod
 * use spec.successfulJobsHistoryLimit and spec.failedJobsHistoryLimit to check attributes for retention
+
+### Services and Networking
+
+* pods ips are virtual and will change to random values over time
+  *  a restart will automatically assign a new ip
+* Services can be used to assign a fixed ip to pods based on labels and act as a front door to pods
+  * services allow for internal and external exposure
+* By default, k8s doesn't restrict inter-pod communication
+* A Network policy can can be implemented to attempt to mitigate security risks
+  * These policies describe access rules for incoming and outgoing network traffic
+
+#### Services
+
+* provide discoverable names and load balancing for pods
+* uses label selection
+  * if defined without a label selector, you need to map service to something via endpointslice object
+* Service types
+  * clusterIP: exposes service on cluster internal ip. Only reachable within the cluster
+  * NodePort: exposes the service on each node's IP at a specific port. Accessible outside the cluster
+  * LoadBalancer: Exposes the service externally using a cloud provider's load balancer
+  * ExternalName: Maps a service to a dns name
+* Create a service via cli: ```kubectl create service clusterip cucumber-aging-service --tcp=80:80```
+* Can also create a service when doing a pod run with the ```--expose``` option: ```kubectl run pickles --image=busy-box --restart=Never --port=80 --expose```
+  * This will create a service on the pod's behalf
+* Can also create a service when deploying a deployment: ```kubectl expose deployment example-deployment --port=80 --target-port=80```
+* Services can be defined via yaml as well:
+
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: example-deploy
+        spec:
+          type: ClusterIP
+          selector:
+            app: example-deploy
+          ports:
+          - port: 80
+            targetPort: 80
+
+* Listing services: ```kubectl get services```
+* Get info about a service: ```kubectl describe service <service name>```
+* Port mapping
+  * incoming traffic is defined via the ports.port attribute
+  * the port you want the traffic to go to for the pods is defined via the ports.targetPort attribute
+* ClusterIP
+  * is default service and only exposes things internal to the cluster
+  * Can use the proxy command to establish a direct connection to the k8s api server from you local system: ```kubectl proxy --port=25000```
+    * Should now be able to access things in the cluster via localhost like: ```curl -L localhost:25000/api/v1/namespaces/default/services/example/proxy```
+* NodePort
+  * exposes access through the node's ip and specific port
+  * Available ports: 30000-32767, assigned automatically if not provided in the spec
+  * find nodeport for service: ```kubectl get service <service name>```
+    * find ip of node: ```kubectl describe node <node name>```
+
+#### Network Policies
+
+* within a cluster, pod to pod communication isn't restricted when using ip or dns name, even across namespaces
+* Network policies define rules/acls for traffic
+* ingress: incoming traffic
+* egress: external traffic
+* Elements of a network policy
+  * podSelector: selects the pods in the namespace to apply the network policy to
+  * policyType: defines the type of traffic (ingress/egress) that the policy applies to
+  * ingress: lists the rules for incoming traffic, each rule can define from and ports
+  * egress: lists the rules for outbound traffic, each rule can define to and ports
+  * cannot create network policies with create command, must be done via yaml
+  * Example yaml (deploy via ```kubectl create -f <filename>.yaml```)
+
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: test
+          namespace: default
+        spec:
+          podSelector:
+            matchLabels:
+              role: example
+          policyTypes:
+            - Ingress
+            - Egress
+          ingress:
+            - from:
+                - ipBlock:
+                    cidr: 172.17.0.0/16
+                    except:
+                      - 172.17.10.0/24
+                - namespaceSelector:
+                    matchLabels:
+                      project: example
+                - podSelector:
+                    matchLabels:
+                      role: frontend
+              ports:
+                - protocol: TCP
+                  port: 9999
+          egress:
+            - to:
+                - ipBlock:
+                    cidr: 10.0.0.0/24
+              ports:
+                - protocol: TCP
+                  port: 7316
+
+* network policies need a network policy controller to be enforced
+  * need a network overlay solution that provides a controller
+  * Example: Cilium
+* list network policies: ```kubectl get networkpolicy```
+* get info about a specific policy: ```kubectl describe networkpolicy <policy name>```
+* Recommend to add a deny-all policy to start (curly brackets mean apply to all):
+
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: default-deny-all
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Ingress
+          - Egress
+
+* Should consider limiting network policies to specific ports when possible
+
+#### State Persistence
+
+* 
