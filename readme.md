@@ -677,4 +677,91 @@ kubectl run test --image=busybox --restart=Never --port=80 -o yaml --dry-run=cli
 
 #### State Persistence
 
-* 
+* volume
+  * by default containers have temporary/ephemeral storage
+  * Volumes can be used to persist data
+  * volume types
+    * determine the medium that backs the volume
+    * long list of types
+    * volumes to know for the exam
+      * emptyDir - Empty directory in Pod with read/write access. Only persisted for the lifespan of a Pod.
+      * hostPath - File or directory from the host node’s filesystem
+      * configMap, secret - Provides a way to inject configuration data
+      * nfs - An existing NFS (Network File System) share
+      * persistentVolumeClaim - Claims a Persistent Volume
+  * using volumes takes 2 steps:
+    * declare the volume via spec.volumes then mount the volume via spec.containers.volumeMounts
+
+            apiVersion: v1
+            kind: Pod
+            metadata:
+              name: example
+            spec:
+              volumes:
+              - name: logs
+                emptyDir: {}
+              containers:
+              - image: busybox
+                name: busybox
+                volumeMounts:
+                - mountPath: /var/logs
+                  name: logs
+
+* persistent volumes
+  * storage device in k8s that is decoupled from a pod and can be managed separately
+  * PersistentVolumeClaim requests the persistent volume for the pod
+  * storageclass - abstraction concept that defines a class of storage device
+    * view storage classes: ```kubectl get storageclass```
+  * Most be defined via manifest
+  * needs to define the storage capacity using spec.capacity and an access mode via spec.accessModes
+  * access mode types
+    * ReadWriteOnce - r/w by a single node
+    * ReadOnlyMany - r by many noeds
+    * ReadWriteMany - r/w by many nodes
+  * persistent volume creation example
+
+        apiVersion: v1
+        kind: PersistentVolume
+        metadata:
+          name: example-pv
+        spec:
+          capacity:
+            storage: 5Gi
+          accessModes:
+            - ReadWriteMany
+          hostPath:
+            path: /data/example
+  
+  * persistent volume claim creation example
+
+        kind: PersistentVolumeClaim
+        apiVersion: v1
+        metadata:
+          name: example-pvc
+        spec:
+          accessModes:
+            - ReadWriteMany
+          resources:
+            requests:
+              storage: 512m
+
+  * mounting persistent volume claim in a pod
+
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: example-pvc
+        spec:
+          volumes:
+            - name: example-v
+              persistentVolumeClaim:
+                claimName: example-pvc
+          containers:
+          - image: busybox
+            name: example
+            command: ["/bin/sh"]
+            args: ["echo", "Hello"]
+            volumeMounts:
+              - mountPath: "/mnt/data"
+                name: example-v
+    
